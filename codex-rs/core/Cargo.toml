@@ -28,6 +28,7 @@ codex-keyring-store = { workspace = true }
 codex-otel = { workspace = true, features = ["otel"] }
 codex-protocol = { workspace = true }
 codex-rmcp-client = { workspace = true }
+rmcp = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-utils-readiness = { workspace = true }
 codex-utils-string = { workspace = true }
@@ -62,6 +63,7 @@ strum_macros = { workspace = true }
 tempfile = { workspace = true }
 test-case = "3.3.1"
 test-log = { workspace = true }
+textwrap = { workspace = true, features = ["terminal_size"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = [
     "formatting",

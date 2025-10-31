@@ -54,6 +54,7 @@ use crate::utils::convert_to_mcp;
 use crate::utils::convert_to_rmcp;
 use crate::utils::create_env_for_mcp_server;
 use crate::utils::run_with_timeout;
+use crate::SamplingHandler;
 
 enum PendingTransport {
     ChildProcess(TokioChildProcess),
@@ -80,6 +81,7 @@ enum ClientState {
 /// https://github.com/modelcontextprotocol/rust-sdk
 pub struct RmcpClient {
     state: Mutex<ClientState>,
+    sampling_handler: Option<Arc<dyn SamplingHandler>>,
 }
 
 impl RmcpClient {
@@ -89,6 +91,7 @@ impl RmcpClient {
         env: Option<HashMap<String, String>>,
         env_vars: &[String],
         cwd: Option<PathBuf>,
+        sampling_handler: Option<Arc<dyn SamplingHandler>>,
     ) -> io::Result<Self> {
         let program_name = program.to_string_lossy().into_owned();
         let mut command = Command::new(&program);
@@ -129,6 +132,7 @@ impl RmcpClient {
             state: Mutex::new(ClientState::Connecting {
                 transport: Some(PendingTransport::ChildProcess(transport)),
             }),
+            sampling_handler,
         })
     }
 
@@ -140,6 +144,7 @@ impl RmcpClient {
         http_headers: Option<HashMap<String, String>>,
         env_http_headers: Option<HashMap<String, String>>,
         store_mode: OAuthCredentialsStoreMode,
+        sampling_handler: Option<Arc<dyn SamplingHandler>>,
     ) -> Result<Self> {
         let default_headers = build_default_headers(http_headers, env_http_headers)?;
 
@@ -183,6 +188,7 @@ impl RmcpClient {
             state: Mutex::new(ClientState::Connecting {
                 transport: Some(transport),
             }),
+            sampling_handler,
         })
     }
 
@@ -194,7 +200,11 @@ impl RmcpClient {
         timeout: Option<Duration>,
     ) -> Result<InitializeResult> {
         let rmcp_params: InitializeRequestParam = convert_to_rmcp(params.clone())?;
-        let client_handler = LoggingClientHandler::new(rmcp_params);
+        let client_handler = if let Some(handler) = &self.sampling_handler {
+            LoggingClientHandler::with_sampling_handler(rmcp_params, handler.clone())
+        } else {
+            LoggingClientHandler::new(rmcp_params)
+        };
 
         let (transport, oauth_persistor) = {
             let mut guard = self.state.lock().await;
