@@ -366,6 +366,7 @@ impl Session {
             config.mcp_servers.clone(),
             config.use_experimental_use_rmcp_client,
             config.mcp_oauth_credentials_store_mode,
+            Some(auth_manager.clone()),
         );
         let default_shell_fut = shell::default_user_shell();
         let history_meta_fut = crate::message_history::history_metadata(&config);
@@ -490,6 +491,11 @@ impl Session {
             services,
             next_internal_sub_id: AtomicU64::new(0),
         });
+
+        sess.services
+            .mcp_connection_manager
+            .set_sampling_session(Some(Arc::clone(&sess)))
+            .await;
 
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.

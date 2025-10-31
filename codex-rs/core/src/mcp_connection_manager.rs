@@ -30,9 +30,11 @@ use tokio::task::JoinSet;
 use tracing::info;
 use tracing::warn;
 
+use crate::codex::Session;
 use crate::config_types::McpServerConfig;
 use crate::config_types::McpServerTransportConfig;
 use crate::mcp_sampling_handler::CodexSamplingHandler;
+use crate::AuthManager;
 
 /// Delimiter used to separate the server name from the tool name in a fully
 /// qualified tool name.
@@ -188,6 +190,9 @@ pub(crate) struct McpConnectionManager {
 
     /// Sampling handler shared across all MCP clients for LLM requests.
     sampling_handler: Option<Arc<CodexSamplingHandler>>,
+
+    /// Shared authentication manager so sampling requests can reuse session auth.
+    auth_manager: Option<Arc<AuthManager>>,
 }
 
 impl McpConnectionManager {
@@ -203,6 +208,7 @@ impl McpConnectionManager {
         mcp_servers: HashMap<String, McpServerConfig>,
         use_rmcp_client: bool,
         store_mode: OAuthCredentialsStoreMode,
+        auth_manager: Option<Arc<AuthManager>>,
     ) -> Result<(Self, ClientStartErrors)> {
         // Create sampling handler if using rmcp client
         let sampling_handler = use_rmcp_client.then_some(Arc::new(CodexSamplingHandler::new()));
@@ -214,6 +220,7 @@ impl McpConnectionManager {
                     clients: HashMap::new(),
                     tools: HashMap::new(),
                     sampling_handler,
+                    auth_manager,
                 },
                 ClientStartErrors::default(),
             ));
@@ -350,6 +357,7 @@ impl McpConnectionManager {
                 clients,
                 tools,
                 sampling_handler,
+                auth_manager,
             },
             errors,
         ))
@@ -361,7 +369,16 @@ impl McpConnectionManager {
     /// to make LLM sampling requests with proper configuration.
     pub async fn set_config(&self, config: Arc<crate::config::Config>) {
         if let Some(handler) = &self.sampling_handler {
-            handler.set_config(config).await;
+            handler
+                .set_config(config, self.auth_manager.clone())
+                .await;
+        }
+    }
+
+    /// Point the sampling handler at the active session so UI notifications can be emitted.
+    pub async fn set_sampling_session(&self, session: Option<Arc<Session>>) {
+        if let Some(handler) = &self.sampling_handler {
+            handler.set_session(session).await;
         }
     }
 
