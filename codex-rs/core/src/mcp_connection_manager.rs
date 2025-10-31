@@ -39,6 +39,10 @@ use tracing::warn;
 
 use crate::config::types::McpServerConfig;
 use crate::config::types::McpServerTransportConfig;
+use crate::config::Config;
+use crate::mcp::sampling::CodexSamplingHandler;
+use crate::AuthManager;
+use crate::codex::Session;
 
 /// Delimiter used to separate the server name from the tool name in a fully
 /// qualified tool name.
@@ -116,6 +120,9 @@ pub(crate) struct McpConnectionManager {
 
     /// Server-name -> configured tool filters.
     tool_filters: HashMap<String, ToolFilter>,
+
+    /// Sampling handler shared across all MCP clients for LLM requests.
+    sampling_handler: Option<Arc<CodexSamplingHandler>>,
 }
 
 impl McpConnectionManager {
@@ -130,10 +137,19 @@ impl McpConnectionManager {
     pub async fn new(
         mcp_servers: HashMap<String, McpServerConfig>,
         store_mode: OAuthCredentialsStoreMode,
+        sampling_handler: Option<Arc<CodexSamplingHandler>>,
     ) -> Result<(Self, ClientStartErrors)> {
         // Early exit if no servers are configured.
         if mcp_servers.is_empty() {
-            return Ok((Self::default(), ClientStartErrors::default()));
+            return Ok((
+                Self {
+                    clients: HashMap::new(),
+                    tools: HashMap::new(),
+                    tool_filters: HashMap::new(),
+                    sampling_handler,
+                },
+                ClientStartErrors::default(),
+            ));
         }
 
         // Launch all configured servers concurrently.
@@ -168,13 +184,22 @@ impl McpConnectionManager {
                 _ => Ok(None),
             };
 
+            let sampling_handler_clone = sampling_handler.clone();
+
             join_set.spawn(async move {
+                let sampling_handler_for_client: Option<
+                    Arc<dyn codex_rmcp_client::SamplingHandler>,
+                > = sampling_handler_clone.as_ref().map(
+                    |handler| -> Arc<dyn codex_rmcp_client::SamplingHandler> { handler.clone() },
+                );
                 let McpServerConfig { transport, .. } = cfg;
                 let params = mcp_types::InitializeRequestParams {
                     capabilities: ClientCapabilities {
                         experimental: None,
                         roots: None,
-                        sampling: None,
+                        sampling: sampling_handler_clone
+                            .as_ref()
+                            .map(|_| json!({ "createMessage": {} })),
                         // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
                         // indicates this should be an empty object.
                         elicitation: Some(json!({})),
@@ -202,8 +227,15 @@ impl McpConnectionManager {
                     } => {
                         let command_os: OsString = command.into();
                         let args_os: Vec<OsString> = args.into_iter().map(Into::into).collect();
-                        match RmcpClient::new_stdio_client(command_os, args_os, env, &env_vars, cwd)
-                            .await
+                        match RmcpClient::new_stdio_client(
+                            command_os,
+                            args_os,
+                            env,
+                            &env_vars,
+                            cwd,
+                            sampling_handler_for_client.clone(),
+                        )
+                        .await
                         {
                             Ok(client) => {
                                 let client = Arc::new(client);
@@ -228,6 +260,7 @@ impl McpConnectionManager {
                             http_headers,
                             env_http_headers,
                             store_mode,
+                            sampling_handler_for_client.clone(),
                         )
                         .await
                         {
@@ -294,6 +327,7 @@ impl McpConnectionManager {
                 clients,
                 tools,
                 tool_filters,
+                sampling_handler,
             },
             errors,
         ))
@@ -306,6 +340,24 @@ impl McpConnectionManager {
             .iter()
             .map(|(name, tool)| (name.clone(), tool.tool.clone()))
             .collect()
+    }
+
+    pub async fn configure_sampling(
+        &self,
+        config: Arc<Config>,
+        auth_manager: Arc<AuthManager>,
+    ) {
+        if let Some(handler) = &self.sampling_handler {
+            handler
+                .set_config(config, Some(auth_manager))
+                .await;
+        }
+    }
+
+    pub async fn set_sampling_session(&self, session: Option<Arc<Session>>) {
+        if let Some(handler) = &self.sampling_handler {
+            handler.set_session(session).await;
+        }
     }
 
     /// Returns a single map that contains all resources. Each key is the

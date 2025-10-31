@@ -4,6 +4,8 @@ use rmcp::model::CancelledNotificationParam;
 use rmcp::model::ClientInfo;
 use rmcp::model::CreateElicitationRequestParam;
 use rmcp::model::CreateElicitationResult;
+use rmcp::model::CreateMessageRequestParam;
+use rmcp::model::CreateMessageResult;
 use rmcp::model::ElicitationAction;
 use rmcp::model::LoggingLevel;
 use rmcp::model::LoggingMessageNotificationParam;
@@ -11,19 +13,48 @@ use rmcp::model::ProgressNotificationParam;
 use rmcp::model::ResourceUpdatedNotificationParam;
 use rmcp::service::NotificationContext;
 use rmcp::service::RequestContext;
+use std::sync::Arc;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
 
-#[derive(Debug, Clone)]
+use crate::SamplingHandler;
+
+#[derive(Clone)]
 pub(crate) struct LoggingClientHandler {
     client_info: ClientInfo,
+    sampling_handler: Option<Arc<dyn SamplingHandler>>,
+}
+
+impl std::fmt::Debug for LoggingClientHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoggingClientHandler")
+            .field("client_info", &self.client_info)
+            .field(
+                "sampling_handler",
+                &self.sampling_handler.as_ref().map(|_| "Some(...)"),
+            )
+            .finish()
+    }
 }
 
 impl LoggingClientHandler {
     pub(crate) fn new(client_info: ClientInfo) -> Self {
-        Self { client_info }
+        Self {
+            client_info,
+            sampling_handler: None,
+        }
+    }
+
+    pub(crate) fn with_sampling_handler(
+        client_info: ClientInfo,
+        handler: Arc<dyn SamplingHandler>,
+    ) -> Self {
+        Self {
+            client_info,
+            sampling_handler: Some(handler),
+        }
     }
 }
 
@@ -42,6 +73,27 @@ impl ClientHandler for LoggingClientHandler {
             action: ElicitationAction::Decline,
             content: None,
         })
+    }
+
+    async fn create_message(
+        &self,
+        params: CreateMessageRequestParam,
+        _context: RequestContext<RoleClient>,
+    ) -> Result<CreateMessageResult, rmcp::ErrorData> {
+        info!(
+            "MCP server requested sampling with {} messages",
+            params.messages.len()
+        );
+
+        if let Some(handler) = &self.sampling_handler {
+            handler.create_message(params).await
+        } else {
+            warn!("Sampling request received but sampling is not configured");
+            Err(rmcp::ErrorData::internal_error(
+                "Sampling is not enabled for this client",
+                None,
+            ))
+        }
     }
 
     async fn on_cancelled(

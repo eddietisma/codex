@@ -5,6 +5,7 @@ mod oauth;
 mod perform_oauth_login;
 mod rmcp_client;
 mod utils;
+mod sampling_handler;
 
 pub use auth_status::determine_streamable_http_auth_status;
 pub use auth_status::supports_oauth_login;
@@ -17,3 +18,4 @@ pub(crate) use oauth::load_oauth_tokens;
 pub use oauth::save_oauth_tokens;
 pub use perform_oauth_login::perform_oauth_login;
 pub use rmcp_client::RmcpClient;
+pub use sampling_handler::SamplingHandler;

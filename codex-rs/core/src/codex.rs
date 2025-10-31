@@ -9,6 +9,7 @@ use crate::client_common::REVIEW_PROMPT;
 use crate::features::Feature;
 use crate::function_tool::FunctionCallError;
 use crate::mcp::auth::McpAuthStatusEntry;
+use crate::mcp::sampling::CodexSamplingHandler;
 use crate::mcp_connection_manager::DEFAULT_STARTUP_TIMEOUT;
 use crate::parse_command::parse_command;
 use crate::parse_turn_item;
@@ -483,11 +484,14 @@ impl Session {
         // - spin up MCP connection manager
         // - perform default shell discovery
         // - load history metadata
+        let sampling_handler = Arc::new(CodexSamplingHandler::new());
+
         let rollout_fut = RolloutRecorder::new(&config, rollout_params);
 
         let mcp_fut = McpConnectionManager::new(
             config.mcp_servers.clone(),
             config.mcp_oauth_credentials_store_mode,
+            Some(Arc::clone(&sampling_handler)),
         );
         let default_shell_fut = shell::default_user_shell();
         let history_meta_fut = crate::message_history::history_metadata(&config);
@@ -545,6 +549,10 @@ impl Session {
                 });
             }
         }
+
+        mcp_connection_manager
+            .configure_sampling(Arc::clone(&config), Arc::clone(&auth_manager))
+            .await;
 
         for (alias, feature) in session_configuration.features.legacy_feature_usages() {
             let canonical = feature.key();
@@ -609,6 +617,11 @@ impl Session {
             services,
             next_internal_sub_id: AtomicU64::new(0),
         });
+
+        sess.services
+            .mcp_connection_manager
+            .set_sampling_session(Some(Arc::clone(&sess)))
+            .await;
 
         // Dispatch the SessionConfiguredEvent first and then report any errors.
         // If resuming, include converted initial messages in the payload so UIs can render them immediately.
