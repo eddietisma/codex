@@ -37,12 +37,12 @@ use tokio::task::JoinSet;
 use tracing::info;
 use tracing::warn;
 
-use crate::config::types::McpServerConfig;
-use crate::config::types::McpServerTransportConfig;
-use crate::config::Config;
-use crate::mcp::sampling::CodexSamplingHandler;
 use crate::AuthManager;
 use crate::codex::Session;
+use crate::config::Config;
+use crate::config::types::McpServerConfig;
+use crate::config::types::McpServerTransportConfig;
+use crate::mcp::sampling::CodexSamplingHandler;
 
 /// Delimiter used to separate the server name from the tool name in a fully
 /// qualified tool name.
@@ -342,15 +342,9 @@ impl McpConnectionManager {
             .collect()
     }
 
-    pub async fn configure_sampling(
-        &self,
-        config: Arc<Config>,
-        auth_manager: Arc<AuthManager>,
-    ) {
+    pub async fn configure_sampling(&self, config: Arc<Config>, auth_manager: Arc<AuthManager>) {
         if let Some(handler) = &self.sampling_handler {
-            handler
-                .set_config(config, Some(auth_manager))
-                .await;
+            handler.set_config(config, Some(auth_manager)).await;
         }
     }
 

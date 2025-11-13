@@ -4,8 +4,8 @@ mod logging_client_handler;
 mod oauth;
 mod perform_oauth_login;
 mod rmcp_client;
-mod utils;
 mod sampling_handler;
+mod utils;
 
 pub use auth_status::determine_streamable_http_auth_status;
 pub use auth_status::supports_oauth_login;

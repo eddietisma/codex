@@ -1,5 +1,6 @@
 use std::fmt::Write;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use std::sync::Weak;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -10,6 +11,7 @@ use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+use crate::AuthManager;
 use crate::auth::CodexAuth;
 use crate::client::ModelClient;
 use crate::client_common::Prompt;
@@ -24,12 +26,11 @@ use crate::model_family::find_family_for_model;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::Event;
 use crate::protocol::EventMsg;
-use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::ToolRouter;
+use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::spec::ToolsConfig;
 use crate::tools::spec::ToolsConfigParams;
 use crate::turn_diff_tracker::TurnDiffTracker;
-use crate::AuthManager;
 use codex_protocol::ConversationId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
@@ -70,11 +71,7 @@ impl CodexSamplingHandler {
 
     /// Set the Config to use for sampling requests.
     /// This must be called before any sampling requests are made.
-    pub async fn set_config(
-        &self,
-        config: Arc<Config>,
-        auth_manager: Option<Arc<AuthManager>>,
-    ) {
+    pub async fn set_config(&self, config: Arc<Config>, auth_manager: Option<Arc<AuthManager>>) {
         *self.config.write().await = Some(config);
         *self.auth_manager.write().await = auth_manager;
     }
@@ -111,13 +108,12 @@ impl SamplingHandler for CodexSamplingHandler {
         );
 
         let sampling_sub_id = format!("mcp-sampling-{}", ConversationId::new());
-        self.notify_sampling_request(&params, &sampling_sub_id).await;
+        self.notify_sampling_request(&params, &sampling_sub_id)
+            .await;
 
         let config = self.get_config().await?;
         let auth_manager = { self.auth_manager.read().await.clone() };
-        let auth = auth_manager
-            .as_ref()
-            .and_then(|manager| manager.auth());
+        let auth = auth_manager.as_ref().and_then(|manager| manager.auth());
 
         // Build prompt conversation for MCP sampling request.
         // Per MCP spec: use the provided systemPrompt, or empty string if not provided.
@@ -144,10 +140,7 @@ impl SamplingHandler for CodexSamplingHandler {
         let turn_context = if let Some(session) = &session {
             Some(
                 session
-                    .new_turn_with_sub_id(
-                        sampling_sub_id.clone(),
-                        SessionSettingsUpdate::default(),
-                    )
+                    .new_turn_with_sub_id(sampling_sub_id.clone(), SessionSettingsUpdate::default())
                     .await,
             )
         } else {
@@ -434,7 +427,12 @@ async fn process_sampling_stream(
                         .await;
                         tool_responses.push(response);
                     }
-                    ResponseItem::CustomToolCall { name, input, call_id, .. } => {
+                    ResponseItem::CustomToolCall {
+                        name,
+                        input,
+                        call_id,
+                        ..
+                    } => {
                         let response = handle_sampling_custom_tool_call(
                             session.as_ref(),
                             turn_context.as_ref(),
@@ -537,9 +535,7 @@ async fn handle_sampling_function_call(
                     {
                         Ok(response) => response,
                         Err(err) => {
-                            warn!(
-                                "Tool dispatch error during sampling for `{name}`: {err}"
-                            );
+                            warn!("Tool dispatch error during sampling for `{name}`: {err}");
                             sampling_tool_failure(
                                 call_id,
                                 format!("Tool '{name}' failed during sampling: {err}"),
@@ -557,9 +553,7 @@ async fn handle_sampling_function_call(
                     );
                 }
                 Err(err) => {
-                    warn!(
-                        "Failed to build tool call for `{name}` during sampling: {err}"
-                    );
+                    warn!("Failed to build tool call for `{name}` during sampling: {err}");
                     return sampling_tool_failure(
                         call_id,
                         format!("Tool '{name}' is not available during sampling: {err}"),
@@ -584,8 +578,7 @@ async fn handle_sampling_custom_tool_call(
     input: &str,
     call_id: &str,
 ) -> ResponseInputItem {
-    if let (Some(session), Some(turn_context), Some(router)) =
-        (session, turn_context, tool_router)
+    if let (Some(session), Some(turn_context), Some(router)) = (session, turn_context, tool_router)
     {
         let item = ResponseItem::CustomToolCall {
             id: None,
@@ -610,9 +603,7 @@ async fn handle_sampling_custom_tool_call(
                 {
                     Ok(response) => response,
                     Err(err) => {
-                        warn!(
-                            "Custom tool dispatch error during sampling for `{name}`: {err}"
-                        );
+                        warn!("Custom tool dispatch error during sampling for `{name}`: {err}");
                         sampling_custom_tool_failure(
                             call_id,
                             format!("Tool '{name}' failed during sampling: {err}"),
@@ -621,18 +612,14 @@ async fn handle_sampling_custom_tool_call(
                 };
             }
             Ok(None) => {
-                warn!(
-                    "Custom tool `{name}` did not produce a tool invocation during sampling"
-                );
+                warn!("Custom tool `{name}` did not produce a tool invocation during sampling");
                 return sampling_custom_tool_failure(
                     call_id,
                     format!("Tool '{name}' is not available during sampling."),
                 );
             }
             Err(err) => {
-                warn!(
-                    "Failed to build custom tool call for `{name}` during sampling: {err}"
-                );
+                warn!("Failed to build custom tool call for `{name}` during sampling: {err}");
                 return sampling_custom_tool_failure(
                     call_id,
                     format!("Tool '{name}' is not available during sampling: {err}"),
@@ -660,10 +647,7 @@ fn sampling_tool_failure(call_id: &str, message: impl Into<String>) -> ResponseI
     }
 }
 
-fn sampling_custom_tool_failure(
-    call_id: &str,
-    message: impl Into<String>,
-) -> ResponseInputItem {
+fn sampling_custom_tool_failure(call_id: &str, message: impl Into<String>) -> ResponseInputItem {
     ResponseInputItem::CustomToolCallOutput {
         call_id: call_id.to_string(),
         output: message.into(),
@@ -695,7 +679,10 @@ fn extract_last_assistant_message(items: &[ResponseItem]) -> Option<String> {
     })
 }
 
-fn build_tools_config(config: &Config, model_family: &crate::model_family::ModelFamily) -> ToolsConfig {
+fn build_tools_config(
+    config: &Config,
+    model_family: &crate::model_family::ModelFamily,
+) -> ToolsConfig {
     ToolsConfig::new(&ToolsConfigParams {
         model_family,
         features: &config.features,
@@ -785,9 +772,7 @@ impl CodexSamplingHandler {
     }
 }
 
-fn build_sampling_request_summary(
-    params: &rmcp::model::CreateMessageRequestParam,
-) -> String {
+fn build_sampling_request_summary(params: &rmcp::model::CreateMessageRequestParam) -> String {
     use rmcp::model::RawContent;
     use rmcp::model::Role;
 
@@ -845,10 +830,7 @@ fn build_sampling_request_summary(
     }
 
     if !params.messages.is_empty() {
-        let _ = writeln!(
-            &mut message,
-            "{DIM}{BRANCH}messages:{RESET}"
-        );
+        let _ = writeln!(&mut message, "{DIM}{BRANCH}messages:{RESET}");
     }
 
     for (idx, msg) in params.messages.iter().enumerate() {
@@ -864,10 +846,7 @@ fn build_sampling_request_summary(
             RawContent::Audio(_) => "[audio content]".into(),
         };
 
-        let _ = writeln!(
-            &mut message,
-            "{DIM}{SUB_BRANCH}#{idx} ({role}):{RESET}"
-        );
+        let _ = writeln!(&mut message, "{DIM}{SUB_BRANCH}#{idx} ({role}):{RESET}");
         for line in snippet.lines() {
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
@@ -904,9 +883,7 @@ fn determine_sampling_line_limit() -> usize {
         return DEFAULT_MAX;
     }
 
-    width
-        .saturating_sub(PADDING)
-        .clamp(MIN, DEFAULT_MAX)
+    width.saturating_sub(PADDING).clamp(MIN, DEFAULT_MAX)
 }
 
 fn build_sampling_response_summary(response_text: &str) -> Option<String> {

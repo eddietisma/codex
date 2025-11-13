@@ -42,6 +42,7 @@ use tokio::time;
 use tracing::info;
 use tracing::warn;
 
+use crate::SamplingHandler;
 use crate::load_oauth_tokens;
 use crate::logging_client_handler::LoggingClientHandler;
 use crate::oauth::OAuthCredentialsStoreMode;
@@ -54,7 +55,6 @@ use crate::utils::convert_to_mcp;
 use crate::utils::convert_to_rmcp;
 use crate::utils::create_env_for_mcp_server;
 use crate::utils::run_with_timeout;
-use crate::SamplingHandler;
 
 enum PendingTransport {
     ChildProcess(TokioChildProcess),
